@@ -30,20 +30,36 @@ global double time = 0;
 global TTF_Font* font;
 char message[64];
 
+double notes[] = {
+	73.416, 77.782, // Drop D & D#
+	82.407, 87.307, 92.499, 97.999, 103.826, 110, 116.541, 123.471, 130.813, 138.591, 146.832, 155.563, 164.814 // First octave
+};
+
 intern void generate_audio(void* userdata, uint8_t* stream, int len)
 {
 	double sample_rate = 48000;
+	int num_samples = 4096;
 
-	double base_freq = 200.0;
-	double chirp_time = 0.25;
-	double chirp_amount = 200.0;
-
+	local_persist int note_index = 0;
+	local_persist double note_time = 1.0;
+	note_time -=  num_samples / sample_rate;
+	double base_freq = notes[note_index];
 	local_persist double freq = base_freq;
+	if (note_time <= 0)
+	{
+		note_index++;
+		WrapValue(0, note_index, ArrayLen(notes) - 1);
+		note_time = 1.0;
+		base_freq = notes[note_index];
+		freq = base_freq;
+	}
+
 	local_persist double phase = 0;
-
+	double chirp_time = 1.0;
+	double chirp_amount = 0;	
 	double freq_inc = chirp_amount / (sample_rate * chirp_time);
+	float volume = 0.5f;
 
-	float volume = 0.1f;
 	float* sample = (float*)stream;
 	for (int i = 0; i < 4096; i++)
 	{
@@ -56,7 +72,7 @@ intern void generate_audio(void* userdata, uint8_t* stream, int len)
 		phase += phase_inc;
 		//sample_time += time_delta;
 	}
-	snprintf(message, ArrayLen(message), "%0.6f - %0.6f", freq, freq_inc);
+	snprintf(message, ArrayLen(message), "%0.6f - %0.6f, note_time=%0.06f, i=%d", freq, freq_inc, note_time, note_index);
 }
 
 intern bool init()
