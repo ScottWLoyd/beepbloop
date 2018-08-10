@@ -32,7 +32,10 @@ char message[64];
 
 double notes[] = {
 	73.416, 77.782, // Drop D & D#
-	82.407, 87.307, 92.499, 97.999, 103.826, 110, 116.541, 123.471, 130.813, 138.591, 146.832, 155.563, 164.814 // First octave
+	82.407, 87.307, 92.499, 97.999, 103.826, 110, 116.541, 123.471, 130.813, 138.591, 146.832, 155.563, // First octave
+	164.814, 174.614, 184.997, 195.998, 207.652, 220, 233.082, 246.942, 261.626, 277.183, 293.665, 311.127, 
+	329.628, 349.228, 369.994, 391.995, 415.305, 440, 466.164, 493.883, 523.251, 554.365, 587.33, 622.254, 
+	659.255, 698.456, 739.989, 783.991, 830.609, 880, 932.328, 987.767, 1046.502, 1108.731, 1174.659, 1244.508,
 };
 
 intern void generate_audio(void* userdata, uint8_t* stream, int len)
@@ -56,7 +59,7 @@ intern void generate_audio(void* userdata, uint8_t* stream, int len)
 
 	local_persist double phase = 0;
 	double chirp_time = 1.0;
-	double chirp_amount = 0;	
+	double chirp_amount = -0.00001;	
 	double freq_inc = chirp_amount / (sample_rate * chirp_time);
 	float volume = 0.5f;
 
