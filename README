@@ -1,0 +1,1 @@
+Depends on SDL and SDL_TTF. You therefore need to link against SDL2.lib, SDL2_main.lib, and SDL2_ttf.lib, and have libfreetype-6.dll, SDL2.dll, SDL2_ttf.dll, and zlib1.dll because I haven't bothered to setup static linking for it yet.
