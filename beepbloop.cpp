@@ -1,6 +1,8 @@
 #include <stdio.h>
 #include <string.h>
 #include <assert.h>
+#define _USE_MATH_DEFINES
+#include <math.h>
 #include <SDL.h>
 #include <SDL_ttf.h>
 
@@ -33,7 +35,6 @@ global TTF_Font* font;
 global uint8_t* stream_data;
 global uint32_t stream_len;
 global char message[64];
-global float* phase_values;
 
 float notes_frequencies[] = {
 	73.416f, 77.782f, // Drop D & D#
@@ -52,6 +53,7 @@ struct Note {
 enum FilterType {
 	Filter_VolumeLogDamping,
 	Filter_VolumeTriangleWave,
+	Filter_VolumeOneOverTSquared,
 };
 
 struct Filter {
@@ -60,9 +62,10 @@ struct Filter {
 	union {
 		struct {
 			float gamma;
+			float t0;
 		} log;
 		struct {
-			float period;
+			float half_period;
 			float min;
 			float max;
 		} triangle;
@@ -80,15 +83,72 @@ struct SampleData {
 	uint32_t sample_index;
 };
 
+struct Sound {
+	uint32_t sample_index;
+	float start_t;
+	float duration;
+};
+
+#define MAX_SOUNDS 256
+#define MAX_NOTES 16
 struct EngineData {
 	bool pause;
 	AudioFormat fmt;
-	SampleData data;
+
+	Sound sounds[MAX_SOUNDS];
+	uint32_t num_sounds;
+
+	SampleData notes[MAX_NOTES];
+	uint32_t num_notes;
 };
 
 intern void apply_filter(Filter filter, float* samples, uint32_t num_samples)
 {
-
+	switch (filter.type)
+	{
+	case Filter_VolumeLogDamping: {
+		float t = 0;
+		for (uint32_t i = 0; i < num_samples; i++)
+		{
+			samples[i] *= powf((float)M_E, -filter.log.gamma * (t - filter.log.t0));
+			t += filter.time_between_samples;
+		}
+	} break;
+	case Filter_VolumeTriangleWave: {
+		float t = 0;
+		int last_iter = 0;
+		float slope = (filter.triangle.max - filter.triangle.min) / filter.triangle.half_period;
+		for (uint32_t i = 0; i < num_samples; i++)
+		{
+			int iter = (int)(t / filter.triangle.half_period);
+			if (iter != last_iter)
+			{
+				slope *= -1;
+				last_iter = iter;
+			}
+			float rel_t = t - (last_iter * filter.triangle.half_period);
+			if (iter % 2 == 0)
+			{
+				//rel_t = filter.triangle.half_period - rel_t;
+			}
+			float val = samples[i];
+			samples[i] = val * slope * rel_t + filter.triangle.min * val;
+			t += filter.time_between_samples;
+		}
+	} break;
+	case Filter_VolumeOneOverTSquared: {
+		float t = 0;
+		for (uint32_t i = 0; i < num_samples; i++)
+		{
+			if (t > 0)
+			{
+				samples[i] /= t * t;
+			}
+			t += filter.time_between_samples;
+		}
+	} break;
+	default: assert(0);
+	}
 }
 
 void generate_audio(void* userdata, uint8_t* stream, int len);
@@ -192,7 +252,7 @@ intern void generate_audio(void* userdata, uint8_t* stream, int len)
 	memcpy(stream_data, stream, len);
 	stream_len = len;
 
-	snprintf(message, ArrayLen(message), "%f - %d", phase_values[engine->data.sample_index], engine->data.sample_index);
+	//snprintf(message, ArrayLen(message), "%f - %d", phase_values[engine->data.sample_index], engine->data.sample_index);
 }
 
 global const int num_harmonics = 15;
@@ -206,7 +266,6 @@ intern void synthesize_note(Note* n, EngineData* engine)
 	}
 
 	size_t bytes = sizeof(float)*engine->data.num_samples;
-	phase_values = (float*)malloc(sizeof(float)*engine->data.num_samples);
 
 	float amps[num_harmonics] = {
 		1, 2, 0.95f, 0.95f, 0.45f, 2, 0.95f, 0.95f, 0.95f, 0.45f, 2, 0.95f, 0.95f, 0.45f, 2
@@ -225,24 +284,39 @@ intern void synthesize_note(Note* n, EngineData* engine)
 		for (uint32_t i = 0; i < engine->data.num_samples; i++)
 		{
 			float val = amplitude * sinf(2.0f * (float)M_PI * phase);
-			phase_values[i] = phase;
 			engine->data.samples[i] += val;
 			//harmonic_samples[harmonic][i] = val;
 			//harmonic_samples[harmonic][i] = engine->data.samples[i];
 			phase += phase_inc;			
 		}
 	}
-
-	Filter log_vol = { Filter_VolumeLogDamping };
-	log_vol.log.gamma = 0.5f;
-	log_vol.time_between_samples = 1.0f / engine->fmt.sample_rate;
-	apply_filter(log_vol, engine->data.samples, engine->data.num_samples);
-
+	
+	// TODO(scott): fix this so it doesn't spike at 1 sec
+	//Filter xsq_val = { Filter_VolumeOneOverTSquared, 1.0f / engine->fmt.sample_rate };
+	//apply_filter(xsq_val, engine->data.samples, engine->data.num_samples);
+	
 	Filter tri_vol = { Filter_VolumeTriangleWave };
-	tri_vol.triangle.period = 0.5f;
-	tri_vol.triangle.min = 0.6f;
+	tri_vol.triangle.half_period = 0.25f;
+	tri_vol.triangle.min = 0.95f;
 	tri_vol.triangle.max = 1;
 	tri_vol.time_between_samples = 1.0f / engine->fmt.sample_rate;
+	apply_filter(tri_vol, engine->data.samples, engine->data.num_samples);
+		
+	tri_vol.triangle.half_period = 0.6f;
+	tri_vol.triangle.min = 0.9f;
+	tri_vol.triangle.max = 1;
+	tri_vol.time_between_samples = 1.0f / engine->fmt.sample_rate;
+	apply_filter(tri_vol, engine->data.samples, engine->data.num_samples);
+
+	tri_vol.triangle.half_period = 0.1f;
+	tri_vol.triangle.min = 0.85f;
+	tri_vol.triangle.max = 1.;
+	apply_filter(tri_vol, engine->data.samples, engine->data.num_samples);
+
+	Filter log_val = { Filter_VolumeLogDamping, 1.0f / engine->fmt.sample_rate };
+	log_val.log.gamma = 0.6f;
+	log_val.log.t0 = -2;
+	apply_filter(log_val, engine->data.samples, engine->data.num_samples);
 }
 
 intern void handle_event(SDL_Event* e)
@@ -366,8 +440,8 @@ int main(int argc, char** argv)
 			}
 			if (event.type == SDL_KEYDOWN)
 			{
-				//engine.data.sample_index = 0;
-				engine.pause = true;
+				engine.data.sample_index = 0;
+				//engine.pause = true;
 			}
 		}
 
